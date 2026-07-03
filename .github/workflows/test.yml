@@ -1,0 +1,55 @@
+name: TDD Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pytest pytest-mock httpx pytest-asyncio
+        if [ -f backend/requirements.txt ]; then pip install -r backend/requirements.txt; fi
+        
+    - name: Test with pytest
+      env:
+        GEMINI_API_KEY: "dummy-key-for-tests"
+        QDRANT_URL: "http://localhost:6333"
+        QDRANT_API_KEY: "dummy-key"
+      run: |
+        cd backend
+        python -m pytest tests/ -v
+
+  frontend-tests:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.22.0'
+        channel: 'stable'
+        
+    - name: Install dependencies
+      run: |
+        cd frontend
+        flutter pub get
+        
+    - name: Run Flutter tests
+      run: |
+        cd frontend
+        flutter test
