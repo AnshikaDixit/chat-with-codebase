@@ -3,6 +3,14 @@ from pathlib import Path
 from langchain_text_splitters import Language, RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 from typing import List
+import tiktoken
+
+# Initialize tokenizer for measuring chunk size in tokens rather than characters
+enc = tiktoken.get_encoding("cl100k_base")
+
+def tiktoken_len(text: str) -> int:
+    return len(enc.encode(text))
+
 
 SUPPORTED_EXTENSIONS = {
     ".py": Language.PYTHON,
@@ -30,10 +38,17 @@ class ChunkingService:
                         language = SUPPORTED_EXTENSIONS[ext]
                         
                         if language == Language.MARKDOWN:
-                            splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+                            splitter = RecursiveCharacterTextSplitter(
+                                chunk_size=512, 
+                                chunk_overlap=50,
+                                length_function=tiktoken_len
+                            )
                         else:
                             splitter = RecursiveCharacterTextSplitter.from_language(
-                                language=language, chunk_size=1000, chunk_overlap=200
+                                language=language, 
+                                chunk_size=250, 
+                                chunk_overlap=50,
+                                length_function=tiktoken_len
                             )
                         
                         chunks = splitter.create_documents(

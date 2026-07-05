@@ -9,3 +9,4 @@ langchain-core
 gitpython
 python-dotenv
 fastembed
+tiktoken
