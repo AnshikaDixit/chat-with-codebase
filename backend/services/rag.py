@@ -22,9 +22,11 @@ class RagService:
 
     def chat_with_repo(self, query: str, filters: Dict[str, Any] = None) -> Dict[str, Any]:
         """Retrieves context and generates an answer using LLM."""
-        # We apply a metadata filter if provided
-        search_kwargs = {"k": 20}
-        must_conditions = []
+        # --- 1. METADATA FILTERING (Pre-filtering) ---
+        # We apply metadata filters (like folder path or repo URL) if provided.
+        # This narrows down the vector search space in Qdrant, improving retrieval precision.
+        search_kwargs = {"k": 20} 
+        must_conditions = [] # Qdrant's FieldCondition : If a user specifies a folder_path or repo_url, the Qdrant engine filters out any vector embeddings that don't match those strings before measuring cosine similarity.
         
         if filters:
             if filters.get("folder_path"):
@@ -35,18 +37,24 @@ class RagService:
         if must_conditions:
             search_kwargs["filter"] = models.Filter(must=must_conditions)
             
+        # --- 2. VECTOR RETRIEVAL ---
+        # We convert our Qdrant vector store into a LangChain retriever.
+        # This will perform a cosine similarity search between the query's embedding and the chunks' embeddings.
         retriever = self.vector_store.as_retriever(search_kwargs=search_kwargs)
         
-        # Get relevant chunks
+        # Get relevant chunks (documents)
         docs = retriever.invoke(query)
         
-        # If the user explicitly asks for file contents, try to find that file specifically
+        # --- 3. TARGETED / EXACT MATCH RETRIEVAL (Fallback logic) ---
+        # If the user explicitly asks for file contents, try to find that file specifically.
+        # Vector similarity might miss exact keyword matches for file names, so we do a metadata-strict query.
         import re
         # Require a file extension in the regex so we don't accidentally match function names
         file_match = re.search(r'(?:contents of|show me|what is in|code for|read)\s+([a-zA-Z0-9_\-\.]+\.[a-zA-Z0-9]+)', query.lower())
         if file_match:
             target_file = file_match.group(1)
             file_conditions = must_conditions.copy()
+            # Force an exact match on the file_name metadata
             file_conditions.append(models.FieldCondition(key="metadata.file_name", match=models.MatchValue(value=target_file)))
             file_filter = models.Filter(must=file_conditions)
             
@@ -60,6 +68,9 @@ class RagService:
                     seen_content.add(d.page_content)
                     docs.append(d)
         
+        # --- 4. CONTEXT ASSEMBLY (Augmentation) ---
+        # Format the retrieved documents into a single string.
+        # This string represents the "Augmented" part of RAG, injecting external knowledge into the prompt.
         citations = []
         context_str = ""
         for doc in docs:
@@ -86,6 +97,9 @@ class RagService:
         """
         prompt = PromptTemplate.from_template(template)
         
+        # --- 5. GENERATION (LLM Integration) ---
+        # We construct a LangChain pipeline (LCEL) to map variables into the PromptTemplate,
+        # pass the prompt to the LLM, and parse the output to a string.
         chain = (
             {"context": lambda x: context_str, "question": RunnablePassthrough()}
             | prompt
@@ -94,6 +108,7 @@ class RagService:
         )
         
         try:
+            # Invoke the chain, triggering the LLM generation based on our augmented context
             answer = chain.invoke(query)
             
             # Aggressively remove openrouter/free moderation prefixes
